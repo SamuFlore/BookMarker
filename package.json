@@ -1,0 +1,16 @@
+{
+  "name": "samubookmarker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SamuBookMarker 跨浏览器书签同步扩展（本文件仅供 Node 工具链使用，浏览器加载扩展时忽略）",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --experimental-test-isolation=none --test tests/*.test.js",
+    "icons": "node tools/gen-icons.mjs",
+    "demo": "node tools/demo/run-demo.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

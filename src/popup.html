@@ -34,11 +34,17 @@
 
     <form class="card form" id="settings-form" autocomplete="off" novalidate>
       <label class="field">
-        <span class="field-label">GitHub Token</span>
+        <span class="field-label">
+          <span>GitHub Token</span>
+          <span class="field-state" id="token-state" hidden></span>
+        </span>
         <input class="field-input" id="token" type="password" autocomplete="off" spellcheck="false" />
       </label>
       <label class="field">
-        <span class="field-label">加密口令</span>
+        <span class="field-label">
+          <span>加密口令</span>
+          <span class="field-state" id="passphrase-state" hidden></span>
+        </span>
         <input class="field-input" id="passphrase" type="password" autocomplete="off" spellcheck="false" />
       </label>
       <label class="field">

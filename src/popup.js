@@ -2,7 +2,7 @@
 
 // SamuBookMarker popup. Plain script (no imports) so esbuild can bundle it to an IIFE.
 
-const SAVED_PLACEHOLDER = '已保存，留空不修改';
+const SAVED_PLACEHOLDER = '留空不修改';
 const UNSET_PLACEHOLDER = '尚未设置';
 const FEEDBACK_MS = 4000;
 const MAX_LOG_ROWS = 20;
@@ -172,12 +172,21 @@ function renderLog(entries) {
   }
 }
 
+function renderSecretState(badge, input, saved) {
+  badge.hidden = false;
+  badge.textContent = saved ? '已保存' : '未设置';
+  badge.className = saved ? 'field-state field-state--ok' : 'field-state field-state--warn';
+  input.classList.toggle('field-input--saved', saved);
+}
+
 function render() {
   const settings = state.settings || {};
   const status = state.status || {};
 
   dom.token.placeholder = settings.hasToken ? SAVED_PLACEHOLDER : UNSET_PLACEHOLDER;
   dom.passphrase.placeholder = settings.hasPassphrase ? SAVED_PLACEHOLDER : UNSET_PLACEHOLDER;
+  renderSecretState(dom.tokenState, dom.token, settings.hasToken);
+  renderSecretState(dom.passphraseState, dom.passphrase, settings.hasPassphrase);
   dom.gistId.placeholder = settings.gistId || UNSET_PLACEHOLDER;
   dom.deviceName.placeholder = settings.deviceName || UNSET_PLACEHOLDER;
 
@@ -316,6 +325,8 @@ function init() {
   dom.form = document.getElementById('settings-form');
   dom.token = document.getElementById('token');
   dom.passphrase = document.getElementById('passphrase');
+  dom.tokenState = document.getElementById('token-state');
+  dom.passphraseState = document.getElementById('passphrase-state');
   dom.gistId = document.getElementById('gist-id');
   dom.deviceName = document.getElementById('device-name');
   dom.saveBtn = document.getElementById('save-btn');

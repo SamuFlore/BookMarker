@@ -167,10 +167,30 @@ body {
 }
 
 .field-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 3px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.field-state {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.field-state--ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+}
+
+.field-state--warn {
+  color: var(--warn);
+  background: var(--warn-bg);
 }
 
 .field-input {
@@ -193,6 +213,11 @@ body {
 .field-input::placeholder {
   color: var(--muted);
   opacity: 0.85;
+}
+
+.field-input--saved::placeholder {
+  color: var(--ok);
+  opacity: 1;
 }
 
 .actions {

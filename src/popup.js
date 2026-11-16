@@ -24,6 +24,7 @@ const PREVIEW_STATE = {
     gistId: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
     deviceName: '桌面 Chrome',
     filename: 'samubookmarker.json',
+    pullOnly: false,
   },
   status: {
     running: false,
@@ -43,7 +44,7 @@ const PREVIEW_STATE = {
 function createEmptyState() {
   return {
     ok: true,
-    settings: { hasToken: false, hasPassphrase: false, gistId: '', deviceName: '', filename: 'samubookmarker.json' },
+    settings: { hasToken: false, hasPassphrase: false, gistId: '', deviceName: '', filename: 'samubookmarker.json', pullOnly: false },
     status: { running: false, lastSyncAt: null, lastSummary: null, lastError: null },
     log: [],
   };
@@ -189,6 +190,7 @@ function render() {
   renderSecretState(dom.passphraseState, dom.passphrase, settings.hasPassphrase);
   dom.gistId.placeholder = settings.gistId || UNSET_PLACEHOLDER;
   dom.deviceName.placeholder = settings.deviceName || UNSET_PLACEHOLDER;
+  dom.pullOnly.checked = settings.pullOnly === true;
 
   dom.lastSync.textContent = formatClock(status.lastSyncAt);
   renderSummary(status.lastSummary);
@@ -241,6 +243,9 @@ function collectSettings() {
   if (passphrase.trim()) settings.passphrase = passphrase;
   if (gistId) settings.gistId = gistId;
   if (deviceName) settings.deviceName = deviceName;
+
+  const pullOnly = dom.pullOnly.checked === true;
+  if (pullOnly !== ((state.settings || {}).pullOnly === true)) settings.pullOnly = pullOnly;
   return settings;
 }
 
@@ -272,7 +277,14 @@ async function onSave(event) {
     const response = await request({ type: 'SAVE_SETTINGS', settings: settings });
     if (response.ok) {
       clearInputs();
-      setFeedback('设置已保存', 'ok');
+      setFeedback(
+        settings.pullOnly === undefined
+          ? '设置已保存'
+          : settings.pullOnly
+            ? '设置已保存：已切换为仅拉取'
+            : '设置已保存：已恢复双向同步',
+        'ok'
+      );
     } else {
       setFeedback(describeError(response.error), 'err');
     }
@@ -298,10 +310,12 @@ async function onSync() {
     const response = await request({ type: 'SYNC_NOW' });
     if (response.ok) {
       const summary = response.summary || {};
+      const pulled = Number(summary.pulled || 0);
+      const conflicts = Number(summary.conflicts || 0);
       setFeedback(
-        '同步完成：推送 ' + Number(summary.pushed || 0) +
-          ' · 拉取 ' + Number(summary.pulled || 0) +
-          ' · 冲突 ' + Number(summary.conflicts || 0),
+        state.settings && state.settings.pullOnly === true
+          ? '仅拉取完成：拉取 ' + pulled + ' · 冲突 ' + conflicts + '（未上传）'
+          : '同步完成：推送 ' + Number(summary.pushed || 0) + ' · 拉取 ' + pulled + ' · 冲突 ' + conflicts,
         'ok'
       );
     } else {
@@ -329,6 +343,7 @@ function init() {
   dom.passphraseState = document.getElementById('passphrase-state');
   dom.gistId = document.getElementById('gist-id');
   dom.deviceName = document.getElementById('device-name');
+  dom.pullOnly = document.getElementById('pull-only');
   dom.saveBtn = document.getElementById('save-btn');
   dom.syncBtn = document.getElementById('sync-btn');
   dom.feedback = document.getElementById('feedback');

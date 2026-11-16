@@ -110,6 +110,7 @@ test('后台：保存设置 → 立即同步 → 跨设备拉取，消息协议�
   assert.equal(initial.ok, true);
   assert.equal(initial.settings.hasToken, false);
   assert.equal(initial.settings.filename, 'samubookmarker.json');
+  assert.equal(initial.settings.pullOnly, false);
   assert.deepEqual(initial.log, []);
 
   const saved = await env.send({
@@ -141,6 +142,11 @@ test('后台：保存设置 → 立即同步 → 跨设备拉取，消息协议�
   assert.equal(typeof finalState.status.lastSyncAt, 'number');
   assert.ok(finalState.log.length > 0);
   assert.equal(finalState.status.lastError, null);
+
+  const toggled = await env.send({ type: 'SAVE_SETTINGS', settings: { pullOnly: true } });
+  assert.equal(toggled.ok, true);
+  const afterToggle = await env.send({ type: 'GET_STATE' });
+  assert.equal(afterToggle.settings.pullOnly, true, '仅拉取开关应持久化');
 });
 
 test('后台：凭据错误时把 UNAUTHORIZED 映射成可读提示且不改动本地', async () => {

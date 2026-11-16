@@ -28,7 +28,9 @@ function createDevice(name, gist, startedAt = 1_000) {
   const clock = { value: startedAt };
   const bookmarks = createFakeBookmarks();
   const store = createStore(createMemoryStorage(), { now: () => clock.value });
+  const logs = [];
   const service = createSyncService({
+    log: (level, text) => logs.push({ level, text }),
     bookmarks,
     store,
     createGistClient: gist.factory,
@@ -43,6 +45,7 @@ function createDevice(name, gist, startedAt = 1_000) {
     store,
     service,
     clock,
+    logs,
     async configure(over = {}) {
       await store.saveSettings({ ...SETTINGS, ...over });
     },
@@ -172,6 +175,45 @@ test('缺少配置时拒绝同步', async () => {
   const a = createDevice('dev-a', gist, 1_000);
   await assert.rejects(() => a.sync(), error => error.code === 'NOT_CONFIGURED');
   assert.equal(gist.state.writes, 0);
+});
+
+test('仅拉取模式：应用远端变更但不写入 Gist，关闭开关后补上传', async () => {
+  const gist = createSharedGist();
+  const a = createDevice('dev-a', gist, 1_000);
+  const b = createDevice('dev-b', gist, 2_000);
+  await a.configure({ pullOnly: false });
+  await b.configure({ pullOnly: true });
+
+  await a.bookmarks.create({ parentId: '1', title: '工作', url: 'https://a.test' });
+  await a.sync();
+  const envelopeAfterA = gist.state.envelope;
+  assert.equal(gist.state.writes, 1);
+
+  const bPull = await b.sync();
+  assert.equal(bPull.summary.created, 1, 'B 应拉取到 A 的书签');
+  assert.deepEqual(b.bookmarks.paths(), ['书签栏/工作 <https://a.test>']);
+  assert.equal(gist.state.writes, 1, '仅拉取模式不得写入 Gist');
+  assert.equal(gist.state.envelope, envelopeAfterA, '远端信封应保持不变');
+  assert.equal(bPull.summary.pushed, 0);
+
+  await b.bookmarks.create({ parentId: '1', title: 'B 本地', url: 'https://b.test' });
+  const bLocal = await b.sync();
+  assert.equal(bLocal.summary.created, 0);
+  assert.equal(gist.state.writes, 1, '本机改动同样不得上传');
+  assert.ok(b.logs.some(entry => entry.text.includes('仅拉取模式')), '应记录跳过上传');
+
+  await b.configure({ pullOnly: false });
+  const bPush = await b.sync();
+  assert.equal(gist.state.writes, 2, '关闭仅拉取后应补上传');
+  assert.equal(bPush.summary.pushed, 2);
+
+  const c = createDevice('dev-c', gist, 3_000);
+  await c.configure();
+  await c.sync();
+  assert.deepEqual(c.bookmarks.paths().sort(), [
+    '书签栏/B 本地 <https://b.test>',
+    '书签栏/工作 <https://a.test>',
+  ]);
 });
 
 test('远端密文里不出现明文书签标题', async () => {

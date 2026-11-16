@@ -39,6 +39,7 @@ async function buildState() {
       gistId: settings.gistId,
       deviceName: settings.deviceName,
       filename: settings.filename,
+      pullOnly: settings.pullOnly === true,
     },
     status: {
       running: status.running,
@@ -62,6 +63,7 @@ async function saveSettings(patch) {
   if (typeof patch.passphrase === 'string' && patch.passphrase.length > 0) next.passphrase = patch.passphrase;
   if (typeof patch.gistId === 'string' && patch.gistId.trim()) next.gistId = extractGistId(patch.gistId);
   if (typeof patch.deviceName === 'string' && patch.deviceName.trim()) next.deviceName = patch.deviceName.trim();
+  if (typeof patch.pullOnly === 'boolean') next.pullOnly = patch.pullOnly;
   if (Object.keys(next).length === 0) {
     return { ok: true, saved: false };
   }

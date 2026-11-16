@@ -111,8 +111,11 @@ export function createSyncService(deps) {
       });
 
       const needsPush = !remote.envelope || !nodesEqual(merged.nodes, remoteNodes);
+      const pullOnly = settings.pullOnly === true;
       let pushed = 0;
-      if (needsPush) {
+      if (pullOnly) {
+        if (needsPush) log('info', '仅拉取模式：本机改动未上传，Gist 保持不变');
+      } else if (needsPush) {
         const payload = toPayload(deviceId, merged.nodes, startedAt);
         let envelope;
         try {

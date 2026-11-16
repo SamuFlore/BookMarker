@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS = {
   gistId: '',
   deviceName: '',
   filename: 'samubookmarker.json',
-  pullOnly: false,
+  syncMode: 'pull-overwrite',
 };
 
 const MAX_LOG = 50;
@@ -29,10 +29,6 @@ export function createStore(storage, options = {}) {
     for (const key of Object.keys(DEFAULT_SETTINGS)) {
       if (!(key in (patch || {}))) continue;
       const value = patch[key];
-      if (typeof DEFAULT_SETTINGS[key] === 'boolean') {
-        if (typeof value === 'boolean') next[key] = value;
-        continue;
-      }
       if (typeof value !== 'string') continue;
       next[key] = key === 'filename' ? value.trim() || DEFAULT_SETTINGS.filename : value;
     }

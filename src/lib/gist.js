@@ -46,9 +46,6 @@ export function createGistClient(options = {}) {
   let cachedEtag = null;
 
   function assertConfig() {
-    if (isBlank(token)) {
-      throw new GistError('BAD_TOKEN', 'A GitHub token is required', { code: 'BAD_TOKEN' });
-    }
     if (isBlank(gistId)) {
       throw new GistError('NOT_FOUND', 'No gist id configured', { code: 'NOT_FOUND' });
     }
@@ -62,11 +59,12 @@ export function createGistClient(options = {}) {
   }
 
   function baseHeaders() {
-    return {
-      Authorization: `Bearer ${token}`,
+    const headers = {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': API_VERSION
     };
+    if (!isBlank(token)) headers.Authorization = `Bearer ${token}`;
+    return headers;
   }
 
   async function statusError(response) {
@@ -191,6 +189,11 @@ export function createGistClient(options = {}) {
   }
 
   async function write(envelope) {
+    if (isBlank(token)) {
+      throw new GistError('TOKEN_REQUIRED', 'A GitHub token is required to write the gist', {
+        code: 'TOKEN_REQUIRED'
+      });
+    }
     const payload = {
       files: {
         [filename]: { content: JSON.stringify(envelope) }
@@ -213,8 +216,7 @@ export function createGistClient(options = {}) {
       const userResponse = await request('GET', `${API_BASE}/user`, {});
       const user = await parseJsonBody(userResponse);
       login = user && typeof user.login === 'string' ? user.login : null;
-    } catch (error) {
-      if (error instanceof GistError && error.code === 'BAD_TOKEN') throw error;
+    } catch {
       login = null;
     }
 
@@ -225,8 +227,7 @@ export function createGistClient(options = {}) {
         ? gist.owner.login
         : null;
       return { ok: true, canWrite: Boolean(login && owner && owner === login), login };
-    } catch (error) {
-      if (error instanceof GistError && error.code === 'BAD_TOKEN') throw error;
+    } catch {
       return { ok: false, canWrite: false, login };
     }
   }

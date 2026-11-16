@@ -12,7 +12,7 @@
 
     <header class="head">
       <h1 class="head-title">SamuBookMarker 书签同步</h1>
-      <p class="head-sub">通过私有 Gist 手动同步书签</p>
+      <p class="head-sub">书签存在你自己的私有 Gist 里，点一下按钮才同步</p>
     </header>
 
     <section class="card status" aria-label="同步状态">
@@ -39,6 +39,7 @@
           <span class="field-state" id="token-state" hidden></span>
         </span>
         <input class="field-input" id="token" type="password" autocomplete="off" spellcheck="false" />
+        <span class="field-hint">拉取可以不填；推送必须填，否则没有写入权限。</span>
       </label>
       <label class="field">
         <span class="field-label">
@@ -55,14 +56,30 @@
         <span class="field-label">设备名</span>
         <input class="field-input" id="device-name" type="text" autocomplete="off" spellcheck="false" />
       </label>
-      <label class="field field--inline">
-        <input class="field-check" id="pull-only" type="checkbox" />
-        <span class="field-check-label">仅拉取：只更新本机书签，不上传改动</span>
+      <label class="field">
+        <span class="field-label">
+          <span>同步方式</span>
+        </span>
+        <select class="field-input" id="sync-mode">
+          <option value="pull-merge">拉取合并</option>
+          <option value="pull-overwrite">拉取覆盖</option>
+          <option value="push">推送</option>
+        </select>
+        <span class="field-hint" id="mode-hint"></span>
       </label>
 
       <div class="actions">
         <button class="btn btn--ghost" id="save-btn" type="submit">保存设置</button>
         <button class="btn btn--primary" id="sync-btn" type="button">立即同步</button>
+      </div>
+      <div class="confirm" id="confirm-panel" hidden>
+        <p class="confirm-title" id="confirm-title"></p>
+        <ul class="confirm-list" id="confirm-list"></ul>
+        <p class="confirm-hint" id="confirm-hint"></p>
+        <div class="confirm-actions">
+          <button class="btn btn--ghost" id="confirm-cancel" type="button">取消</button>
+          <button class="btn btn--danger" id="confirm-run" type="button">确认执行</button>
+        </div>
       </div>
       <p class="feedback" id="feedback" role="status" hidden></p>
     </form>

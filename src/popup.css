@@ -193,25 +193,12 @@ body {
   background: var(--warn-bg);
 }
 
-.field--inline {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 2px;
-  margin-bottom: 11px;
-}
-
-.field-check {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.field-check-label {
-  font-size: 12px;
-  color: var(--text);
+.field-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .field-input {
@@ -223,6 +210,16 @@ body {
   color: var(--text);
   font: inherit;
   font-size: 13px;
+}
+
+select.field-input {
+  appearance: none;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 55%, calc(100% - 9px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
 }
 
 .field-input:focus {
@@ -276,6 +273,56 @@ body {
   border-color: var(--border);
   background: var(--panel-alt);
   color: var(--text);
+}
+
+.btn--danger {
+  background: var(--err);
+  color: var(--panel);
+}
+
+.btn--danger:not(:disabled):hover {
+  opacity: 0.88;
+}
+
+.confirm {
+  margin-top: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--err);
+  border-radius: 8px;
+  background: var(--err-bg);
+}
+
+.confirm-title {
+  margin: 0 0 6px;
+  color: var(--err);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.confirm-list {
+  margin: 0 0 7px;
+  padding-left: 16px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.confirm-list:empty {
+  display: none;
+}
+
+.confirm-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 9px;
 }
 
 .btn--ghost:not(:disabled):hover {

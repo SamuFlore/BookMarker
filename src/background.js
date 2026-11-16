@@ -1,6 +1,6 @@
 import { createBookmarksAdapter, createStorageAdapter } from './lib/browserapi.js';
 import { createStore } from './lib/store.js';
-import { createSyncService, describeError } from './lib/sync.js';
+import { createSyncService, describeError, normalizeMode } from './lib/sync.js';
 import { createGistClient } from './lib/gist.js';
 import { encryptPayload, decryptPayload } from './lib/crypto.js';
 
@@ -39,7 +39,7 @@ async function buildState() {
       gistId: settings.gistId,
       deviceName: settings.deviceName,
       filename: settings.filename,
-      pullOnly: settings.pullOnly === true,
+      syncMode: normalizeMode(settings.syncMode),
     },
     status: {
       running: status.running,
@@ -63,7 +63,7 @@ async function saveSettings(patch) {
   if (typeof patch.passphrase === 'string' && patch.passphrase.length > 0) next.passphrase = patch.passphrase;
   if (typeof patch.gistId === 'string' && patch.gistId.trim()) next.gistId = extractGistId(patch.gistId);
   if (typeof patch.deviceName === 'string' && patch.deviceName.trim()) next.deviceName = patch.deviceName.trim();
-  if (typeof patch.pullOnly === 'boolean') next.pullOnly = patch.pullOnly;
+  if (typeof patch.syncMode === 'string') next.syncMode = normalizeMode(patch.syncMode);
   if (Object.keys(next).length === 0) {
     return { ok: true, saved: false };
   }
@@ -71,17 +71,14 @@ async function saveSettings(patch) {
   return { ok: true, saved: true };
 }
 
-async function runSync() {
+async function guarded(action) {
   if (status.running) {
     return { ok: false, error: { code: 'BUSY', message: '同步正在进行中，请稍候' } };
   }
   status.running = true;
   status.lastError = null;
   try {
-    const result = await service.syncNow();
-    status.lastSummary = result.summary;
-    status.lastSyncAt = Date.now();
-    return { ok: true, summary: result.summary };
+    return await action();
   } catch (error) {
     const described = describeError(error);
     status.lastError = { code: described.code, message: described.message };
@@ -92,6 +89,42 @@ async function runSync() {
   }
 }
 
+function recordSummary(summary) {
+  if (!summary) return;
+  status.lastSummary = summary;
+  status.lastSyncAt = Date.now();
+}
+
+async function runSync(syncMode) {
+  return guarded(async () => {
+    if (typeof syncMode === 'string') {
+      await saveSettings({ syncMode });
+    }
+    const result = await service.run();
+    recordSummary(result.summary);
+    return {
+      ok: true,
+      confirmRequired: result.confirmRequired === true,
+      preview: result.preview,
+      summary: result.summary ?? null,
+    };
+  });
+}
+
+async function confirmSync(fingerprint) {
+  return guarded(async () => {
+    const result = await service.confirm(fingerprint);
+    recordSummary(result.summary);
+    return { ok: true, summary: result.summary };
+  });
+}
+
+async function cancelSync() {
+  const result = service.cancel();
+  await flushLog();
+  return { ok: true, cancelled: result.cancelled };
+}
+
 async function handle(message) {
   switch (message?.type) {
     case 'GET_STATE':
@@ -99,7 +132,11 @@ async function handle(message) {
     case 'SAVE_SETTINGS':
       return saveSettings(message.settings ?? {});
     case 'SYNC_NOW':
-      return runSync();
+      return runSync(message.syncMode);
+    case 'SYNC_CONFIRM':
+      return confirmSync(typeof message.fingerprint === 'string' ? message.fingerprint : '');
+    case 'SYNC_CANCEL':
+      return cancelSync();
     default:
       return { ok: false, error: { code: 'UNKNOWN_MESSAGE', message: '未知的消息类型' } };
   }

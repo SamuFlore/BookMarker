@@ -12,6 +12,15 @@ const ROOT_ID_KIND = {
 };
 
 const POSITIONAL_KINDS = ['bar', 'other', 'mobile'];
+
+export class BookmarkApiError extends Error {
+  constructor(stage, cause) {
+    super('改动本机书签时出错（' + stage + '）：' + String(cause?.message ?? cause ?? '未知原因'));
+    this.name = 'BookmarkApiError';
+    this.stage = stage;
+    this.cause = cause;
+  }
+}
 const SYNCED_KINDS = new Set(['bar', 'other', 'mobile']);
 
 export function classifyRootKind(localId, position) {
@@ -108,13 +117,31 @@ export function planApply(mergedNodes, options) {
 
   const plan = { remove: [], create: [], update: [], reparent: [] };
 
+  // 删除必须由深到浅：Chrome 删文件夹会连子项一起删，先删父再删子会报
+  // "Can't find bookmark for id."。深度按本机现有树算（要删的项不在 merged 里）。
+  const localDepthOf = (syncId) => {
+    let depth = 0;
+    const seen = new Set([syncId]);
+    let here = current.get(syncId);
+    while (here && here.parentSyncId && !seen.has(here.parentSyncId)) {
+      const parent = current.get(here.parentSyncId);
+      if (!parent) break;
+      seen.add(here.parentSyncId);
+      depth += 1;
+      here = parent;
+    }
+    return depth;
+  };
+  const queued = new Set();
   for (const syncId of Object.keys(idmapState.bySyncId)) {
     if (isRootSyncId(syncId)) continue;
     const node = merged.get(syncId);
     const localId = idmapState.bySyncId[syncId];
     if (!localId) continue;
     if (!node || node.deleted) {
-      plan.remove.push({ syncId, localId, depth: depths.get(syncId) ?? 0 });
+      if (queued.has(localId)) continue;
+      queued.add(localId);
+      plan.remove.push({ syncId, localId, depth: localDepthOf(syncId) });
     }
   }
   plan.remove.sort((a, b) => b.depth - a.depth);
@@ -165,7 +192,7 @@ export async function executePlan(api, options) {
       await api.remove(item.localId);
       removed.push(item.syncId);
     } catch (error) {
-      if (!isGone(error)) throw error;
+      if (!isGone(error)) throw new BookmarkApiError('删除书签', error);
     }
     unlinkSync(idmapState, item.syncId);
   }
@@ -181,7 +208,7 @@ export async function executePlan(api, options) {
       link(idmapState, createdNode.id, item.syncId);
       created.push(item.syncId);
     } catch (error) {
-      if (!isGone(error)) throw error;
+      if (!isGone(error)) throw new BookmarkApiError('新建书签', error);
     }
   }
 
@@ -196,7 +223,7 @@ export async function executePlan(api, options) {
       await api.update(localId, patch);
       updated.push(item.syncId);
     } catch (error) {
-      if (!isGone(error)) throw error;
+      if (!isGone(error)) throw new BookmarkApiError('修改书签', error);
     }
   }
 
@@ -209,7 +236,7 @@ export async function executePlan(api, options) {
       await api.move(localId, { parentId: parentLocalId });
       reparented.push(item.syncId);
     } catch (error) {
-      if (!isGone(error)) throw error;
+      if (!isGone(error)) throw new BookmarkApiError('移动书签', error);
     }
   }
 
@@ -233,7 +260,13 @@ export async function reconcileOrder(api, options) {
     const parentLocalId = resolveLocal(idmapState, rootLocalBySyncId, parentSyncId);
     if (!parentLocalId) continue;
     const desired = [...children].sort(compareSiblings).map(node => node.syncId);
-    const actualNodes = await api.getChildren(parentLocalId);
+    let actualNodes;
+    try {
+      actualNodes = await api.getChildren(parentLocalId);
+    } catch (error) {
+      if (isGone(error)) continue;
+      throw new BookmarkApiError('读取文件夹', error);
+    }
     const actual = actualNodes.map(node => syncIdOfLocal(idmapState, node.id) ?? '\u0000' + node.id);
     for (let target = 0; target < desired.length; target += 1) {
       if (actual[target] === desired[target]) continue;
@@ -241,7 +274,12 @@ export async function reconcileOrder(api, options) {
       const localId = localIdOf(idmapState, desired[target]);
       if (!localId) continue;
       if (moves >= maxMoves) return { moves, truncated: true };
-      await api.move(localId, { parentId: parentLocalId, index: target });
+      try {
+        await api.move(localId, { parentId: parentLocalId, index: target });
+      } catch (error) {
+        if (isGone(error)) continue;
+        throw new BookmarkApiError('调整书签顺序', error);
+      }
       if (from >= 0) actual.splice(from, 1);
       actual.splice(target, 0, desired[target]);
       moves += 1;
@@ -279,9 +317,10 @@ function compareSiblings(left, right) {
   return left.syncId < right.syncId ? -1 : 1;
 }
 
+// Chrome 说 "Can't find bookmark for id."，Firefox 说 "No bookmarks found"/"Invalid bookmark id"。
 function isGone(error) {
   const message = String(error?.message ?? error ?? '');
-  return /cannot find|not found|no bookmark|invalid id/i.test(message);
+  return /can'?t find|cannot find|not found|no bookmark|no such bookmark|invalid (bookmark )?id|does not exist|doesn't exist/i.test(message);
 }
 
 function defaultMint() {

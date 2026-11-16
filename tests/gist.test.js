@@ -218,15 +218,18 @@ test('maps a timeout to NETWORK', async () => {
   assert.ok(fetchImpl);
 });
 
-test('rejects a blank token with BAD_TOKEN', async () => {
-  await expectGistError(
-    createGistClient({ token: '   ', gistId: GIST_ID, fetchImpl: async () => jsonResponse({}) }).read(),
-    'BAD_TOKEN'
+test('没有 token 也能读，写入才要求 token', async () => {
+  const { client, calls } = createClient(
+    () => jsonResponse(
+      { files: { [FILENAME]: { content: JSON.stringify(ENVELOPE) } } },
+      { headers: { etag: 'W/"anon"' } }
+    ),
+    { token: '   ' }
   );
-  await expectGistError(
-    createGistClient({ gistId: GIST_ID, fetchImpl: async () => jsonResponse({}) }).write(ENVELOPE),
-    'BAD_TOKEN'
-  );
+  const result = await client.read();
+  assert.deepEqual(result.envelope, ENVELOPE);
+  assert.equal('Authorization' in calls[0].headers, false, '匿名读取不得带 Authorization');
+  await expectGistError(client.write(ENVELOPE), 'TOKEN_REQUIRED');
 });
 
 test('read() follows raw_url when the file is truncated', async () => {

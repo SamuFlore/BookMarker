@@ -122,3 +122,110 @@ test('executePlan + reconcileOrder 把本地树对齐到合并结果', async () 
   assert.equal(bar[0].title, '新文件夹');
   assert.equal(bar[1].id, keep.id);
 });
+
+// Chrome 删除文件夹会连子项一起删，再删子项就报 "Can't find bookmark for id."
+function createChromeLikeBookmarks() {
+  const base = createFakeBookmarks();
+  const live = new Set();
+  const removed = [];
+  return {
+    removed,
+    getTree: () => base.getTree(),
+    getChildren: id => base.getChildren(id),
+    async create(payload) {
+      const node = await base.create(payload);
+      live.add(node.id);
+      return node;
+    },
+    async update(id, patch) {
+      if (!live.has(id)) throw new Error("Can't find bookmark for id.");
+      return base.update(id, patch);
+    },
+    async move(id, destination) {
+      if (!live.has(id)) throw new Error("Can't find bookmark for id.");
+      return base.move(id, destination);
+    },
+    async remove(id) {
+      removed.push(id);
+      if (!live.has(id)) throw new Error("Can't find bookmark for id.");
+      const doomed = [];
+      const walk = async (nodeId) => {
+        doomed.push(nodeId);
+        for (const child of await base.getChildren(nodeId)) await walk(child.id);
+      };
+      await walk(id);
+      await base.remove(id);
+      for (const doomedId of doomed) live.delete(doomedId);
+    },
+  };
+}
+
+test('删除文件夹与子项时先删子项，不会撞上 Chrome 的级联删除', async () => {
+  const api = createChromeLikeBookmarks();
+  const folder = await api.create({ parentId: '1', title: '工作' });
+  const child = await api.create({ parentId: folder.id, title: 'Inbox', url: 'https://inbox.test' });
+  const idmap = createIdMap();
+  const snapshot = flattenTree(await api.getTree(), { idmap, previous: new Map(), deviceId: 'dev-a', now: 1000 });
+  const current = new Map(snapshot.nodes.map(node => [node.syncId, node]));
+
+  const plan = planApply([], { idmap, currentNodes: current });
+  assert.equal(plan.remove.length, 2);
+  assert.equal(plan.remove[0].localId, child.id, '应先删子项再删父文件夹');
+
+  const applied = await executePlan(api, { idmap, plan, mergedNodes: [], rootLocalBySyncId: snapshot.rootLocalBySyncId });
+  assert.equal(applied.removed.length, 2);
+  assert.deepEqual(api.removed, [child.id, folder.id]);
+});
+
+test('已随父文件夹消失的项按“已不存在”跳过，不中断整次同步', async () => {
+  const api = createChromeLikeBookmarks();
+  const folder = await api.create({ parentId: '1', title: '工作' });
+  const child = await api.create({ parentId: folder.id, title: 'Inbox', url: 'https://inbox.test' });
+  const idmap = createIdMap();
+  const snapshot = flattenTree(await api.getTree(), { idmap, previous: new Map(), deviceId: 'dev-a', now: 1000 });
+  const folderNode = snapshot.nodes.find(node => node.title === '工作');
+  const childNode = snapshot.nodes.find(node => node.title === 'Inbox');
+
+  // 故意把父文件夹排在前面，模拟 Chrome 级联后子项已不存在
+  const plan = {
+    remove: [
+      { syncId: folderNode.syncId, localId: folder.id, depth: 0 },
+      { syncId: childNode.syncId, localId: child.id, depth: 1 },
+    ],
+    create: [],
+    update: [],
+    reparent: [],
+  };
+  const applied = await executePlan(api, { idmap, plan, mergedNodes: [], rootLocalBySyncId: snapshot.rootLocalBySyncId });
+  assert.equal(applied.removed.length, 1, '级联消失的那条按已不存在处理');
+  assert.deepEqual(api.removed, [folder.id, child.id]);
+});
+
+test('未知的书签 API 错误带阶段信息抛出，便于定位', async () => {
+  const idmap = createIdMap();
+  link(idmap, '1', ROOT_SYNC_IDS.bar);
+  const api = {
+    async getTree() { return [{ id: '0', title: '', children: [] }]; },
+    async getChildren() { return []; },
+    async create() { throw new Error('boom'); },
+    async update() { throw new Error('boom'); },
+    async move() { throw new Error('boom'); },
+    async remove() { throw new Error('boom'); },
+  };
+  const plan = {
+    remove: [],
+    create: [{ syncId: 'x', parentSyncId: ROOT_SYNC_IDS.bar, type: 'bookmark', title: 'x', url: 'https://x.test', depth: 0 }],
+    update: [],
+    reparent: [],
+  };
+
+  await assert.rejects(
+    executePlan(api, { idmap, plan, mergedNodes: [], rootLocalBySyncId: {} }),
+    (error) => {
+      assert.equal(error.name, 'BookmarkApiError');
+      assert.match(error.message, /新建书签/);
+      assert.match(error.message, /boom/);
+      return true;
+    }
+  );
+});

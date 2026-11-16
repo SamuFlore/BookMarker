@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SamuBookMarker",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "通过私有 Gist 手动同步书签，口令加密，跨浏览器可用。",
   "permissions": ["bookmarks", "storage"],
   "host_permissions": ["https://api.github.com/*"],

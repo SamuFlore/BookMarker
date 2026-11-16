@@ -55,6 +55,13 @@ function createDevice({ name, deviceId, gistStore, clock }) {
     deviceId,
     log: () => {},
   });
+  const act = async (mode) => {
+    await store.saveSettings({ syncMode: mode });
+    const first = await service.run();
+    if (!first.confirmRequired) return first;
+    const done = await service.confirm(first.preview.fingerprint);
+    return { summary: done.summary, preview: first.preview };
+  };
   return {
     name,
     bookmarks,
@@ -65,8 +72,13 @@ function createDevice({ name, deviceId, gistStore, clock }) {
       gistId: GIST_ID,
       filename: FILENAME,
       deviceName: name,
+      syncMode: 'pull-merge',
     }),
-    syncNow: () => service.syncNow(),
+    // 三个动作显式选择：推送 / 拉取合并 / 拉取覆盖
+    act,
+    push: () => act('push'),
+    pullMerge: () => act('pull-merge'),
+    pullOverwrite: () => act('pull-overwrite'),
     plainTree: async () => toPlain(await bookmarks.getTree()),
   };
 }
@@ -95,9 +107,9 @@ test('双设备往返：手动同步、口令加密快照、删除墓碑与 LWW 
   await seedDeviceA(deviceA);
   assert.equal(countNodes(await deviceA.bookmarks.getTree()), 5, '设备A 应有 5 项待同步内容');
 
-  await t.test('A 首次同步只写一个加密信封，方法仅有 GET/PATCH', async () => {
+  await t.test('A 推送一次只写一个加密信封，方法仅有 GET/PATCH', async () => {
     clock.advance();
-    const result = await deviceA.syncNow();
+    const result = await deviceA.push();
     assert.equal(result.summary.pushed, 5);
     assert.equal(gistStore.count('PATCH'), 1, '首次同步应写一次远端');
     const envelope = JSON.parse(gistStore.content);
@@ -109,9 +121,9 @@ test('双设备往返：手动同步、口令加密快照、删除墓碑与 LWW 
     }
   });
 
-  await t.test('B 首次同步拉取全部书签，两台设备书签树一致', async () => {
+  await t.test('B 首次拉取覆盖拿到全部书签，两台设备书签树一致', async () => {
     clock.advance();
-    const result = await deviceB.syncNow();
+    const result = await deviceB.pullOverwrite();
     assert.equal(result.summary.created, 5, 'B 应创建 5 个本地节点');
     assert.equal(countNodes(await deviceB.bookmarks.getTree()), 5);
     assert.equal(await deviceB.plainTree(), await deviceA.plainTree(), '两台设备书签树必须逐行一致');
@@ -126,9 +138,9 @@ test('双设备往返：手动同步、口令加密快照、删除墓碑与 LWW 
     await deviceB.bookmarks.remove(mdnOnB.id);
 
     clock.advance();
-    await deviceB.syncNow();
+    await deviceB.push();
     clock.advance();
-    const resultOnA = await deviceA.syncNow();
+    const resultOnA = await deviceA.pullMerge();
 
     assert.equal(resultOnA.summary.updated, 1, 'A 应应用 1 处远端改名');
     assert.equal(resultOnA.summary.removed, 1, 'A 应删除 1 个远端已删节点');
@@ -142,16 +154,19 @@ test('双设备往返：手动同步、口令加密快照、删除墓碑与 LWW 
     const homepageOnA = findByTitle(await deviceA.bookmarks.getTree(), 'Samu 主页');
     await deviceA.bookmarks.update(homepageOnA.id, { title: 'Samu 主页（A 改）' });
     clock.advance();
-    await deviceA.syncNow();
+    await deviceA.push();
 
     const homepageOnB = findByTitle(await deviceB.bookmarks.getTree(), 'Samu 主页');
     await deviceB.bookmarks.update(homepageOnB.id, { title: 'Samu 主页（B 改，较晚）' });
     clock.advance();
-    const conflictOnB = await deviceB.syncNow();
+    const conflictOnB = await deviceB.pullMerge();
     assert.equal(conflictOnB.summary.conflicts, 1, '同一项双改应被记为一次冲突');
+    // 拉取合并不会上传，B 需要再推一次，较晚的版本才会到远端
+    clock.advance();
+    await deviceB.push();
 
     clock.advance();
-    await deviceA.syncNow();
+    await deviceA.pullMerge();
     const titleOnA = findByTitle(await deviceA.bookmarks.getTree(), 'Samu 主页（B 改，较晚）');
     const titleOnB = findByTitle(await deviceB.bookmarks.getTree(), 'Samu 主页（B 改，较晚）');
     assert.ok(titleOnA, '较晚的 B 版本应胜出并覆盖 A');
@@ -163,9 +178,9 @@ test('双设备往返：手动同步、口令加密快照、删除墓碑与 LWW 
   await t.test('无变更时再次同步不重复写远端', async () => {
     const patchesBefore = gistStore.count('PATCH');
     clock.advance();
-    const idleA = await deviceA.syncNow();
+    const idleA = await deviceA.push();
     clock.advance();
-    const idleB = await deviceB.syncNow();
+    const idleB = await deviceB.push();
     assert.equal(idleA.summary.pushed, 0, 'A 无变更不应推送');
     assert.equal(idleB.summary.pushed, 0, 'B 无变更不应推送');
     assert.equal(gistStore.count('PATCH'), patchesBefore, '无变更时 PATCH 次数不得增加');
@@ -187,7 +202,7 @@ test('双设备往返：手动同步、口令加密快照、删除墓碑与 LWW 
   await t.test('远端故障注入：401 映射为 UNAUTHORIZED 且不写入', async () => {
     const patchesBefore = gistStore.count('PATCH');
     gistStore.fail(401, 'Bad credentials');
-    await assert.rejects(deviceA.syncNow(), (error) => {
+    await assert.rejects(deviceA.push(), (error) => {
       assert.equal(error.code, 'UNAUTHORIZED');
       return true;
     });

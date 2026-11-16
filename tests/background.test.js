@@ -110,7 +110,7 @@ test('后台：保存设置 → 立即同步 → 跨设备拉取，消息协议�
   assert.equal(initial.ok, true);
   assert.equal(initial.settings.hasToken, false);
   assert.equal(initial.settings.filename, 'samubookmarker.json');
-  assert.equal(initial.settings.pullOnly, false);
+  assert.equal(initial.settings.syncMode, 'pull-overwrite', '默认同步方式应为拉取覆盖');
   assert.deepEqual(initial.log, []);
 
   const saved = await env.send({
@@ -120,9 +120,11 @@ test('后台：保存设置 → 立即同步 → 跨设备拉取，消息协议�
       passphrase: '口令{{PASSWORD_hzpf5wor}}',
       gistId: 'https://gist.github.com/samu/deadbeef1234',
       deviceName: '桌面 Chrome',
+      syncMode: 'push',
     },
   });
   assert.equal(saved.ok, true);
+  assert.equal((await env.send({ type: 'GET_STATE' })).settings.syncMode, 'push', '推送模式应持久化');
 
   const afterSave = await env.send({ type: 'GET_STATE' });
   assert.equal(afterSave.settings.hasToken, true);
@@ -131,8 +133,13 @@ test('后台：保存设置 → 立即同步 → 跨设备拉取，消息协议�
   assert.equal(afterSave.settings.deviceName, '桌面 Chrome');
 
   await env.bookmarks.create({ parentId: '1', title: '示例', url: 'https://example.test' });
-  const synced = await env.send({ type: 'SYNC_NOW' });
+  const planned = await env.send({ type: 'SYNC_NOW' });
+  assert.equal(planned.ok, true, JSON.stringify(planned.error ?? {}));
+  assert.equal(planned.confirmRequired, true, '推送会覆盖 Gist，必须先预览确认');
+  assert.equal(planned.preview.mode, 'push');
+  const synced = await env.send({ type: 'SYNC_CONFIRM', fingerprint: planned.preview.fingerprint });
   assert.equal(synced.ok, true, JSON.stringify(synced.error ?? {}));
+  assert.equal(synced.summary.pushed, 1);
   assert.ok(github.state.content.length > 0, '应写入远端');
   assert.ok(!github.state.content.includes('example.test'), '远端内容必须是密文');
   assert.ok(github.state.calls.every(call => call.method === 'GET' || call.method === 'PATCH'));
@@ -143,10 +150,30 @@ test('后台：保存设置 → 立即同步 → 跨设备拉取，消息协议�
   assert.ok(finalState.log.length > 0);
   assert.equal(finalState.status.lastError, null);
 
-  const toggled = await env.send({ type: 'SAVE_SETTINGS', settings: { pullOnly: true } });
+  // 切到“拉取覆盖”后，本机多出来的那一条必须先预览、确认，才会被删除
+  await env.bookmarks.create({ parentId: '1', title: '本机独有', url: 'https://local-only.test' });
+  const toggled = await env.send({ type: 'SAVE_SETTINGS', settings: { syncMode: 'pull-overwrite' } });
   assert.equal(toggled.ok, true);
-  const afterToggle = await env.send({ type: 'GET_STATE' });
-  assert.equal(afterToggle.settings.pullOnly, true, '仅拉取开关应持久化');
+  assert.equal((await env.send({ type: 'GET_STATE' })).settings.syncMode, 'pull-overwrite', '同步方式应持久化');
+
+  const dryRun = await env.send({ type: 'SYNC_NOW' });
+  assert.equal(dryRun.ok, true);
+  assert.equal(dryRun.confirmRequired, true, '拉取并覆盖前必须先预览确认');
+  assert.equal(dryRun.preview.deleteCount, 1);
+  assert.equal(dryRun.summary, null, '预览不得产生同步结果');
+  assert.ok(env.bookmarks.paths().some(path => path.includes('本机独有')), '预览不得删除任何书签');
+
+  const cancelled = await env.send({ type: 'SYNC_CANCEL' });
+  assert.equal(cancelled.ok, true);
+  const afterCancel = await env.send({ type: 'SYNC_CONFIRM', fingerprint: dryRun.preview.fingerprint });
+  assert.equal(afterCancel.ok, false, '取消后旧计划必须失效');
+  assert.equal(afterCancel.error.code, 'PLAN_EXPIRED');
+
+  const again = await env.send({ type: 'SYNC_NOW' });
+  const applied = await env.send({ type: 'SYNC_CONFIRM', fingerprint: again.preview.fingerprint });
+  assert.equal(applied.ok, true, JSON.stringify(applied.error ?? {}));
+  assert.equal(applied.summary.removed, 1);
+  assert.equal(env.bookmarks.paths().some(path => path.includes('本机独有')), false, '确认后本机独有项应被删除');
 });
 
 test('后台：凭据错误时把 UNAUTHORIZED 映射成可读提示且不改动本地', async () => {
@@ -181,4 +208,26 @@ test('后台：未配置时同步返回 NOT_CONFIGURED，未知消息被拒绝',
   const unknown = await env.send({ type: 'DO_SOMETHING_ELSE' });
   assert.equal(unknown.ok, false);
   assert.equal(unknown.error.code, 'UNKNOWN_MESSAGE');
+});
+test('后台：动作随 SYNC_NOW 一起下发，选推送就按推送执行且不动本机', async () => {
+  const github = createFakeGitHub();
+  const env = installFakeChrome(github);
+  await import('../src/background.js');
+
+  await env.send({
+    type: 'SAVE_SETTINGS',
+    settings: { token: 'ghp_test', passphrase: '口令', gistId: 'abc123def456', syncMode: 'pull-overwrite' },
+  });
+  await env.bookmarks.create({ parentId: '1', title: '本机独有', url: 'https://local-only.test' });
+
+  const planned = await env.send({ type: 'SYNC_NOW', syncMode: 'push' });
+  assert.equal(planned.ok, true, JSON.stringify(planned.error ?? {}));
+  assert.equal(planned.preview.mode, 'push', '应按请求里带的动作执行，而不是存储里的旧动作');
+  assert.equal(planned.confirmRequired, true);
+
+  const done = await env.send({ type: 'SYNC_CONFIRM', fingerprint: planned.preview.fingerprint });
+  assert.equal(done.ok, true, JSON.stringify(done.error ?? {}));
+  assert.deepEqual(env.bookmarks.paths(), ['书签栏/本机独有 <https://local-only.test>'], '推送不得删除本机书签');
+  assert.ok(github.state.content.length > 0, '远端应被写入');
+  assert.equal((await env.send({ type: 'GET_STATE' })).settings.syncMode, 'push', '动作应被记住');
 });

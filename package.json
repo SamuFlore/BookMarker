@@ -1,6 +1,6 @@
 {
   "name": "samubookmarker",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "SamuBookMarker 跨浏览器书签同步扩展（本文件仅供 Node 工具链使用，浏览器加载扩展时忽略）",
